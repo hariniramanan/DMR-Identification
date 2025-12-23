@@ -1,0 +1,165 @@
+if (!requireNamespace("IlluminaHumanMethylation450kanno.ilmn12.hg19", quietly = TRUE)) {
+  BiocManager::install("IlluminaHumanMethylation450kanno.ilmn12.hg19")
+}
+
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(minfi)  # needed for getAnnotation()
+
+anno <- getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+annotation_df <- data.frame(
+  Name = anno$Name,
+  chr = anno$chr,
+  pos = anno$pos,
+  stringsAsFactors = FALSE
+)
+
+run_dmr_pipeline <- function(sample_id, beta_matrix, mapping, annotation_df, delta_threshold = 0.2, max_width_per_cpg = 176) {
+  
+  # Step 1: Extract Intlibrary(bumphunter)
+library(minfi)
+library(limma)
+library(GenomicRanges)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+  internal_id <- mapping$Internal_ID[mapping$GSM_ID == sample_id]
+  if (length(internal_id) == 0) {
+    stop("Sample ID not found in mapping.")
+  }
+  
+  # Step 2: Subset beta values for sample and controls
+  beta_sample <- beta_matrix[, colnames(beta_matrix) == internal_id, drop = FALSE]
+  control_ids <- mapping$Internal_ID[mapping$GSM_ID != sample_id]
+  beta_controls <- beta_matrix[, colnames(beta_matrix) %in% control_ids]
+  mean_controls <- rowMeans(beta_controls, na.rm = TRUE)
+  
+  # Step 3: Compute delta-beta
+  delta_beta <- beta_sample[,1] - mean_controls
+  delta_df <- data.frame(
+    CpG_ID = rownames(beta_matrix),
+    Sample = internal_id,
+    Beta = beta_sample[,1],
+    Mean_Beta = mean_controls,
+    Delta_Beta = delta_beta
+  )
+  
+  # Step 4: Filter significant CpGs
+  filtered <- delta_df[abs(delta_df$Delta_Beta) >= delta_threshold, ]
+  
+  # Step 5: Annotate with genomic coordinates
+  annotated <- merge(filtered, annotation_df, by.x = "CpG_ID", by.y = "Name")
+  annotated <- annotated[order(annotated$chr, annotated$pos), ]
+  
+  if (nrow(annotated) == 0) {
+    message("No DMRs detected. Try relaxing parameters.")
+    return(NULL)
+  }
+  
+  # Step 6: Greedy DMR grouping
+  regions <- list()
+  current <- list()
+  
+  for (i in 1:nrow(annotated)) {
+    row <- annotated[i, ]
+    
+    if (length(current) == 0) {
+      current <- list(rows = row, dir = sign(row$Delta_Beta))
+    } else {
+      last <- tail(current$rows, 1)
+      same_chr <- row$chr == last$chr
+      close_enough <- abs(row$pos - last$pos) <= 1000
+      same_dir <- sign(row$Delta_Beta) == current$dir
+      
+      if (same_chr && close_enough && same_dir) {
+        current$rows <- rbind(current$rows, row)
+      } else {
+        if (nrow(current$rows) >= 3) {
+          region <- current$rows
+          width <- max(region$pos) - min(region$pos)
+          if ((width / nrow(region)) <= max_width_per_cpg) {
+            regions[[length(regions) + 1]] <- data.frame(
+              Chr = unique(region$chr),
+              Start = min(region$pos),
+              End = max(region$pos),
+              Num_CpGs = nrow(region),
+              Avg_Delta_Beta = mean(region$Delta_Beta),
+              CpG_IDs = paste(region$CpG_ID, collapse = ";")
+            )
+          }
+        }
+        current <- list(rows = row, dir = sign(row$Delta_Beta))
+      }
+    }
+  }
+  
+  # Final region check
+  if (length(current) > 0 && nrow(current$rows) >= 3) {
+    region <- current$rows
+    width <- max(region$pos) - min(region$pos)
+    if ((width / nrow(region)) <= max_width_per_cpg) {
+      regions[[length(regions) + 1]] <- data.frame(
+        Chr = unique(region$chr),
+        Start = min(region$pos),
+        End = max(region$pos),
+        Num_CpGs = nrow(region),
+        Avg_Delta_Beta = mean(region$Delta_Beta),
+        CpG_IDs = paste(region$CpG_ID, collapse = ";")
+      )
+    }
+  }
+  
+  # Step 7: Combine and export
+  if (length(regions) > 0) {
+    dmr_df <- do.call(rbind, regions)
+    write.csv(dmr_df, paste0("DMRs_sample", sample_id, ".csv"), row.names = FALSE)
+    message(paste("✅ DMRs written for", sample_id))
+    return(dmr_df)
+  } else {
+    message("⚠️ No DMRs detected after filtering.")
+    return(NULL)
+  }
+}
+dmrs_616 <- run_dmr_pipeline("GSM8543377", beta_matrix, mapping, annotation_df)
+dmrs_754 <- run_dmr_pipeline("GSM8543378", beta_matrix, mapping, annotation_df)
+dmrs_771 <- run_dmr_pipeline("GSM8543379", beta_matrix, mapping, annotation_df)
+dmrs_777 <- run_dmr_pipeline("GSM8543380", beta_matrix, mapping, annotation_df)
+dmrs_814 <- run_dmr_pipeline("GSM8543381", beta_matrix, mapping, annotation_df)
+dmrs_1025 <- run_dmr_pipeline("GSM8543382", beta_matrix, mapping, annotation_df)
+dmrs_1027 <- run_dmr_pipeline("GSM8543383", beta_matrix, mapping, annotation_df)
+dmrs_1038 <- run_dmr_pipeline("GSM8543384", beta_matrix, mapping, annotation_df)
+dmrs_1052 <- run_dmr_pipeline("GSM8543385", beta_matrix, mapping, annotation_df)
+dmrs_1063 <- run_dmr_pipeline("GSM8543386", beta_matrix, mapping, annotation_df)
+dmrs_1101 <- run_dmr_pipeline("GSM8543387", beta_matrix, mapping, annotation_df)
+dmrs_1185 <- run_dmr_pipeline("GSM8543388", beta_matrix, mapping, annotation_df)
+dmrs_1259 <- run_dmr_pipeline("GSM8543389", beta_matrix, mapping, annotation_df)
+dmrs_1266 <- run_dmr_pipeline("GSM8543390", beta_matrix, mapping, annotation_df)
+dmrs_1285 <- run_dmr_pipeline("GSM8543391", beta_matrix, mapping, annotation_df)
+dmrs_1324 <- run_dmr_pipeline("GSM8543392", beta_matrix, mapping, annotation_df)
+dmrs_1407 <- run_dmr_pipeline("GSM8543393", beta_matrix, mapping, annotation_df)
+dmrs_1409 <- run_dmr_pipeline("GSM8543394", beta_matrix, mapping, annotation_df)
+dmrs_1429 <- run_dmr_pipeline("GSM8543395", beta_matrix, mapping, annotation_df)
+dmrs_1442<- run_dmr_pipeline("GSM8543396", beta_matrix, mapping, annotation_df)
+dmrs_1453<- run_dmr_pipeline("GSM8543397", beta_matrix, mapping, annotation_df)
+dmrs_1465<- run_dmr_pipeline("GSM8543398", beta_matrix, mapping, annotation_df)
+dmrs_1486<- run_dmr_pipeline("GSM8543399", beta_matrix, mapping, annotation_df)
+dmrs_1488<- run_dmr_pipeline("GSM8543400", beta_matrix, mapping, annotation_df)
+dmrs_1500<- run_dmr_pipeline("GSM8543401", beta_matrix, mapping, annotation_df)
+dmrs_1547<- run_dmr_pipeline("GSM8543402", beta_matrix, mapping, annotation_df)
+dmrs_1670<- run_dmr_pipeline("GSM8543403", beta_matrix, mapping, annotation_df)
+dmrs_1674<- run_dmr_pipeline("GSM8543404", beta_matrix, mapping, annotation_df)
+dmrs_1712<- run_dmr_pipeline("GSM8543405", beta_matrix, mapping, annotation_df)
+dmrs_1713<- run_dmr_pipeline("GSM8543406", beta_matrix, mapping, annotation_df)
+dmrs_1860<- run_dmr_pipeline("GSM8543407", beta_matrix, mapping, annotation_df)
+dmrs_1906<- run_dmr_pipeline("GSM8543408", beta_matrix, mapping, annotation_df)
+dmrs_1981<- run_dmr_pipeline("GSM8543409", beta_matrix, mapping, annotation_df)
+dmrs_2149<- run_dmr_pipeline("GSM8543410", beta_matrix, mapping, annotation_df)
+dmrs_2456<- run_dmr_pipeline("GSM8543411", beta_matrix, mapping, annotation_xadf)
+dmrs_2830<- run_dmr_pipeline("GSM8543412", beta_matrix, mapping, annotation_df)
+dmrs_2880<- run_dmr_pipeline("GSM8543413", beta_matrix, mapping, annotation_df)
+dmrs_3428<- run_dmr_pipeline("GSM8543414", beta_matrix, mapping, annotation_df)
+dmrs_3439<- run_dmr_pipeline("GSM8543415", beta_matrix, mapping, annotation_df)
+dmrs_4332<- run_dmr_pipeline("GSM8543416", beta_matrix, mapping, annotation_df)
+dmrs_4337<- run_dmr_pipeline("GSM8543417", beta_matrix, mapping, annotation_df)
+dmrs_4670<- run_dmr_pipeline("GSM8543418", beta_matrix, mapping, annotation_df)
+dmrs_5180<- run_dmr_pipeline("GSM8543419", beta_matrix, mapping, annotation_df)
+dmrs_5282<- run_dmr_pipeline("GSM8543420", beta_matrix, mapping, annotation_df)
+dmrs_10251<- run_dmr_pipeline("GSM8543421", beta_matrix, mapping, annotation_df)
