@@ -15,11 +15,11 @@ The DMR identification workflow includes:
 - Region-level aggregation using:
   - DMRcate (kernel smoothing–based approach)
   - bumphunter (bump hunting approach)
-- Filtering DMRs based on:
-  - Minimum number of CpG sites
-  - Effect size (delta-beta)
-  - Statistical significance
-  - Genomic span constraints
+A genomic region is accepted as a Differentially Methylated Region (DMR) only if all of the following conditions are satisfied:
+1. The region must contain ≥ 3 consecutive CpG sites: Ensures the signal is regional, not driven by a single CpG.
+2. The absolute methylation difference (Δβ) between case and control must be:
+                            ≥ 20% (|Δβ| ≥ 0.20)
+3. The total genomic span of the region must satisfy:  Region width / number of CpGs ≤ 176 bp
 
 ## Tools and Packages
 - R (>= 4.x)
