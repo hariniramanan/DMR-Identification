@@ -1,0 +1,156 @@
+# Load required libraries
+library(bumphunter)
+library(minfi)
+library(limma)
+library(tidyverse)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+# Helper function: Beta → M conversion
+
+beta_to_M <- function(beta) {
+  beta <- pmin(pmax(beta, 1e-6), 1 - 1e-6)  # avoid 0/1
+  log2(beta / (1 - beta))
+}
+
+
+# Main function: run bumphunter
+
+run_bumphunter_raw <- function(sample_id,
+                               beta_matrix,
+                               mapping,
+                               max_gap_bp = 1000,
+                               resamples_B = 250,
+                               cutoff_M = 0.5) {
+
+  message("Running bumphunter for sample: ", sample_id)
+
+
+  # Load and format annotation
+
+  ann <- getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+  ann_df <- data.frame(
+    probe = rownames(ann),
+    chr   = as.character(ann$chr),
+    pos   = ann$pos,
+    stringsAsFactors = FALSE
+  )
+
+
+  # Resolve sample IDs
+
+  internal_id <- mapping$Internal_ID[mapping$GSM_ID == sample_id]
+
+  if (length(internal_id) != 1) {
+    stop("Sample ID not found or not unique in mapping.")
+  }
+
+  if (!internal_id %in% colnames(beta_matrix)) {
+    stop("Internal_ID not found in beta_matrix.")
+  }
+
+  control_ids <- setdiff(mapping$Internal_ID, internal_id)
+  control_ids <- control_ids[control_ids %in% colnames(beta_matrix)]
+
+  if (length(control_ids) < 1) {
+    stop("No valid control samples found.")
+  }
+
+
+  # Subset beta values
+
+  beta_target   <- beta_matrix[, internal_id, drop = FALSE]
+  beta_controls <- beta_matrix[, control_ids, drop = FALSE]
+
+
+  # Match probes to annotation
+
+  common_probes <- intersect(
+    rownames(beta_matrix),
+    ann_df$probe
+  )
+
+  if (length(common_probes) < 1000) {
+    warning("Low number of common probes: ", length(common_probes))
+  }
+
+  beta_target   <- beta_target[common_probes, , drop = FALSE]
+  beta_controls <- beta_controls[common_probes, , drop = FALSE]
+  ann_sub       <- ann_df[match(common_probes, ann_df$probe), ]
+
+
+  # Convert to M-values
+
+  M_mat <- cbind(
+    beta_to_M(beta_controls),
+    beta_to_M(beta_target)
+  )
+
+  colnames(M_mat) <- c(colnames(beta_controls), internal_id)
+
+
+  # Design matrix (1 vs rest)
+
+  group <- factor(c(
+    rep(0, ncol(beta_controls)),
+    1
+  ))
+
+  design <- model.matrix(~ group)
+
+  # -----------------------------
+  # Run bumphunter
+  # -----------------------------
+  set.seed(1)
+
+  bh <- bumphunter(
+    object     = M_mat,
+    design     = design,
+    coef       = 2,
+    chr        = ann_sub$chr,
+    pos        = ann_sub$pos,
+    cutoff     = cutoff_M,
+    maxGap     = max_gap_bp,
+    nullMethod = "bootstrap",
+    B          = resamples_B,
+    smooth     = TRUE
+  )
+
+  results <- bh$table
+
+
+  # Save outputs
+
+  if (!dir.exists("results")) {
+    dir.create("results")
+  }
+
+  out_file <- file.path(
+    "results",
+    paste0("RawDMRs_", sample_id, ".csv")
+  )
+
+  write.csv(results, out_file, row.names = FALSE)
+
+
+  writeLines(
+    capture.output(sessionInfo()),
+    file.path("results", paste0("sessionInfo_", sample_id, ".txt"))
+  )
+
+  message("Completed bumphunter for sample: ", sample_id)
+  return(results)
+}
+
+
+# Example run (single sample)
+
+raw_results <- run_bumphunter_raw(
+  sample_id   = "GSM8543379",
+  beta_matrix = beta_matrix,
+  mapping     = mapping,
+  resamples_B = 250,
+  cutoff_M    = 0.5
+)
+
+head(raw_results)
